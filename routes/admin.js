@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const Slot           = require('../models/Slot');
 const ParkingSession = require('../models/ParkingSession');
 const SessionHistory = require('../models/SessionHistory');
+const ParkingRequest = require('../models/ParkingRequest');
 const adminAuth      = require('../middleware/adminAuth');
 require('dotenv').config();
 
@@ -214,6 +215,81 @@ router.delete('/history/:id', async (req, res) => {
     if (!result)
       return res.status(404).json({ success: false, message: 'Record not found' });
     res.json({ success: true, message: 'History record deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ============================================================
+// SLOT REQUEST MANAGEMENT
+// ============================================================
+
+// GET /api/admin/requests — list all pending requests
+router.get('/requests', async (req, res) => {
+  try {
+    const requests = await ParkingRequest.find({ status: 'pending' }).sort({ requested_at: 1 });
+    res.json({ success: true, data: requests, count: requests.length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/admin/requests/:id/approve — approve a request, park the vehicle
+router.post('/requests/:id/approve', async (req, res) => {
+  try {
+    const reqDoc = await ParkingRequest.findById(req.params.id);
+    if (!reqDoc || reqDoc.status !== 'pending')
+      return res.status(404).json({ success: false, message: 'Request not found or already handled' });
+
+    const slot = await Slot.findById(reqDoc.slot_id);
+    if (!slot || slot.status !== 'vacant') {
+      reqDoc.status = 'rejected';
+      await reqDoc.save();
+      return res.status(409).json({ success: false, message: 'Slot is no longer available; request auto-rejected' });
+    }
+
+    // Check vehicle not already parked elsewhere
+    const existing = await ParkingSession.findOne({ vehicle_number: reqDoc.vehicle_number });
+    if (existing)
+      return res.status(409).json({ success: false, message: 'Vehicle is already parked in another slot' });
+
+    // Mark slot occupied
+    slot.status = 'occupied';
+    await slot.save();
+
+    // Create parking session
+    const session = await ParkingSession.create({
+      slot_id:        slot._id,
+      slot_number:    slot.slot_number,
+      vehicle_number: reqDoc.vehicle_number,
+      vehicle_type:   reqDoc.vehicle_type,
+      entry_time:     new Date()
+    });
+
+    reqDoc.status = 'approved';
+    await reqDoc.save();
+
+    res.json({
+      success: true,
+      message: `Approved. ${reqDoc.vehicle_number} parked in slot ${slot.slot_number}`,
+      data: { session_id: session._id, slot_number: slot.slot_number }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/admin/requests/:id/reject — reject a request
+router.post('/requests/:id/reject', async (req, res) => {
+  try {
+    const reqDoc = await ParkingRequest.findById(req.params.id);
+    if (!reqDoc || reqDoc.status !== 'pending')
+      return res.status(404).json({ success: false, message: 'Request not found or already handled' });
+
+    reqDoc.status = 'rejected';
+    await reqDoc.save();
+
+    res.json({ success: true, message: `Request for ${reqDoc.vehicle_number} rejected` });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
