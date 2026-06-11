@@ -7,6 +7,7 @@ const slotsRouter    = require('./routes/slots');
 const parkingRouter  = require('./routes/parking');
 const dashboardRouter = require('./routes/dashboard');
 const adminRouter    = require('./routes/admin');
+const requestsRouter = require('./routes/requests');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
@@ -28,6 +29,7 @@ app.use('/api/parking',   parkingRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/history',   dashboardRouter);
 app.use('/api/admin',     adminRouter);
+app.use('/api/requests',  requestsRouter);
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date() }));
